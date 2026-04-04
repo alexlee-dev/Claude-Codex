@@ -1,6 +1,6 @@
-import type { Message } from '../../../base/types/message.ts'
+import type { Message } from '../../base/types/message.ts'
 
-export function serializeTranscript(
+export function serializeToolTranscript(
   messages: readonly Message[],
   systemPrompt?: string,
 ): string {

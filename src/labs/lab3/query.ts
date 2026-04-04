@@ -39,7 +39,7 @@ export async function* query(
     systemPrompt,
     model,
     cwd = process.cwd(),
-    maxSteps = 4,
+    maxSteps = 6,
   } = args
 
   const toolMap = new Map(tools.map(tool => [tool.name, tool]))
@@ -95,7 +95,7 @@ export async function* query(
   }
 
   const fallback =
-    'I could not finish within the lab2 step limit. Please narrow the request.'
+    'I could not finish within the lab3 step limit. Please narrow the request.'
   transcript.append(createAssistantMessage(fallback))
   yield {
     type: 'assistant_message',
