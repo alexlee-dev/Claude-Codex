@@ -15,6 +15,7 @@ export function createRunCommandTool(): Tool {
     description:
       'Run a small allowlist of safe repository commands: bun test or cat <path>.',
     inputHint: '{"command":"bun","args":["test"]}',
+    requiresApproval: true,
     async run(input, ctx) {
       const command = expectString(input.command, 'command')
       const args = expectStringArray(input.args ?? [], 'args')

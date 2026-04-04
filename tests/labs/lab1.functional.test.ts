@@ -30,6 +30,11 @@ test('lab1 CLI supports a 3-turn conversation with the mock backend', async () =
   activeSessions.add(session)
 
   await session.waitForOutput(() => session.stdout.includes('you> '))
+  session.write('/tools\n')
+
+  await session.waitForOutput(() =>
+    session.stdout.includes('No tools available.\n'),
+  )
   session.write('hello\n')
 
   await session.waitForOutput(() =>
@@ -45,7 +50,7 @@ test('lab1 CLI supports a 3-turn conversation with the mock backend', async () =
   await session.waitForOutput(() =>
     session.stdout.includes('assistant> mock reply 3\nyou> '),
   )
-  session.write('exit\n')
+  session.write('/exit\n')
 
   const exitCode = await session.waitForExit()
 
@@ -53,7 +58,8 @@ test('lab1 CLI supports a 3-turn conversation with the mock backend', async () =
 
   expect(exitCode).toBe(0)
   expect(session.stderr).toBe('')
-  expect(session.stdout).toContain('Type exit to quit.')
+  expect(session.stdout).toContain('Type /exit to quit. Type /tools to list tools.')
+  expect(session.stdout).toContain('No tools available.')
   expect(session.stdout).toContain('assistant> mock reply 1')
   expect(session.stdout).toContain('assistant> mock reply 2')
   expect(session.stdout).toContain('assistant> mock reply 3')

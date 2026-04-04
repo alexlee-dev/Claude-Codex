@@ -23,8 +23,8 @@ export async function runRepl(): Promise<void> {
     bannerMode: 'repo agent · read-only tools',
     serializeTranscript,
     defaultMaxSteps: 4,
-    createQueryOptions({ tools, cwd, maxSteps }) {
-      return { tools, cwd, maxSteps }
+    createQueryOptions({ tools, cwd, maxSteps, requestToolApproval }) {
+      return { tools, cwd, maxSteps, requestToolApproval }
     },
   })
 }

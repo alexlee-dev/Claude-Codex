@@ -18,6 +18,7 @@ export function createReplaceInFileTool(): Tool {
       'Replace exact UTF-8 text inside a repository file. Can create a new file when old_string is empty.',
     inputHint:
       '{"path":"src/app.ts","old_string":"old text","new_string":"new text","replace_all":false}',
+    requiresApproval: true,
     async run(input, ctx) {
       const path = expectString(input.path, 'path')
       const oldString = expectString(input.old_string, 'old_string')

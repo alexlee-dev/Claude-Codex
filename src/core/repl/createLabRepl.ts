@@ -16,6 +16,7 @@ import {
   createUserMessage,
 } from '../../base/utils/messageFactory.ts'
 import { QueryEngine, type QueryFunction } from '../engine/QueryEngine.ts'
+import type { ToolApprovalRequest } from '../query/createToolAgentQuery.ts'
 import { labToolRegistrations } from '../../labs/index.ts'
 import {
   ToolRegistry,
@@ -44,6 +45,7 @@ export interface CreateLabReplOptions<TQueryOptions extends object> {
     tools: Tool[]
     cwd: string
     maxSteps?: number
+    requestToolApproval?: (request: ToolApprovalRequest) => Promise<boolean>
   }) => TQueryOptions
 }
 
@@ -75,6 +77,15 @@ export async function createLabRepl<TQueryOptions extends object>(
     options.includeToolCatalog === false
       ? options.systemPrompt
       : buildSystemPromptWithTools(options.systemPrompt, tools)
+  const toolApprovalBridge: {
+    handler?:
+      | ((request: {
+          toolName: string
+          description: string
+          input: Record<string, unknown>
+        }) => Promise<boolean>)
+      | undefined
+  } = {}
 
   const transcript = new InMemoryTranscript<Message>()
   const session = new QueryEngine({
@@ -89,7 +100,17 @@ export async function createLabRepl<TQueryOptions extends object>(
     }),
     query: options.query,
     createUserMessage,
-    queryOptions: (options.createQueryOptions?.({ tools, cwd, maxSteps }) ??
+    queryOptions: (options.createQueryOptions?.({
+      tools,
+      cwd,
+      maxSteps,
+      requestToolApproval: request =>
+        toolApprovalBridge.handler?.({
+          toolName: request.tool.name,
+          description: request.tool.description,
+          input: request.input,
+        }) ?? Promise.resolve(false),
+    }) ??
       {}) as TQueryOptions,
     systemPrompt,
   })
@@ -102,6 +123,10 @@ export async function createLabRepl<TQueryOptions extends object>(
       cwd,
       title: options.title ?? 'Claude Codex',
       mode: options.bannerMode,
+    },
+    toolCatalog: tools.length === 0 ? '' : renderToolCatalog(tools),
+    setToolApprovalHandler(handler) {
+      toolApprovalBridge.handler = handler
     },
     renderEvent(event: AgentEvent, stream) {
       if (event.type === 'assistant_message') {

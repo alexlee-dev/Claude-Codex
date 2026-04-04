@@ -11,7 +11,7 @@
 - default model `gpt-5.4-mini`
 - default reasoning effort `low`
 - no tools
-- REPL with `exit` / `quit`
+- REPL with `/exit` and `/tools`
 
 ## Run
 

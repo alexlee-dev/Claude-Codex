@@ -52,6 +52,14 @@ test('lab2 CLI can search for alexlee and read the first matching file with mock
   activeSessions.add(session)
 
   await session.waitForOutput(() => session.stdout.includes('you> '))
+  session.write('/tools\n')
+
+  await session.waitForOutput(() =>
+    session.stdout.includes('Available tools:\n- read_file:'),
+  )
+  await session.waitForOutput(() =>
+    session.stdout.includes('- search_code: Search repository text with ripgrep and return matching lines.'),
+  )
   session.write('search the repo with key word "alexlee" and tell me the content of the first file.\n')
 
   await session.waitForOutput(() =>
@@ -72,14 +80,15 @@ test('lab2 CLI can search for alexlee and read the first matching file with mock
     session.stdout.includes('assistant> The first matching file is docs/alexlee-note.txt.'),
   )
 
-  session.write('exit\n')
+  session.write('/exit\n')
   const exitCode = await session.waitForExit()
 
   activeSessions.delete(session)
 
   expect(exitCode).toBe(0)
   expect(session.stderr).toBe('')
-  expect(session.stdout).toContain('Type exit to quit.')
+  expect(session.stdout).toContain('Type /exit to quit. Type /tools to list tools.')
+  expect(session.stdout).toContain('Available tools:')
   expect(session.stdout).toContain('tool:search_code> {"query":"alexlee"}')
   expect(session.stdout).toContain(
     'tool:result:search_code> ./docs/alexlee-note.txt:1:alexlee lives here',

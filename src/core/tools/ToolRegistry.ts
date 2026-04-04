@@ -6,6 +6,7 @@ export interface Tool {
   name: string
   description: string
   inputHint: string
+  requiresApproval?: boolean
   run(input: Record<string, unknown>, ctx: ToolContext): Promise<string>
 }
 

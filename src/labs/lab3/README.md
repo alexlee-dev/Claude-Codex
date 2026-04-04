@@ -18,7 +18,7 @@
     - `bun test`
     - `cat <path>`
 - tool-using loop with a small max-step guard
-- REPL with `exit` / `quit`
+- REPL with `/exit` and `/tools`
 
 ## Run
 
