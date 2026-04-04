@@ -13,6 +13,7 @@ The long-term direction is to assemble these experiments into a cohesive Claude/
 ## Labs
 
 - `lab1`: multi-turn chat over a local transcript, backed by the official Codex CLI package, default model `gpt-5.4-mini`, default reasoning effort `low`
+- `lab2`: minimal read-only repository agent with `read_file` and `search_code` tools
 
 ## Quick start
 
@@ -20,6 +21,7 @@ The long-term direction is to assemble these experiments into a cohesive Claude/
 bun install
 make login
 make lab1
+make lab2
 ```
 
 Debug mode:
