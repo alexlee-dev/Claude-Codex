@@ -10,6 +10,7 @@ export class PersistentTranscript<TMessage>
   private readonly messages: TMessage[]
   private readonly persist: (messages: readonly TMessage[]) => Promise<void>
   private pendingWrite: Promise<void> = Promise.resolve()
+  private persistedCount: number
 
   constructor(options: {
     initialMessages?: readonly TMessage[]
@@ -17,6 +18,7 @@ export class PersistentTranscript<TMessage>
   }) {
     this.messages = [...(options.initialMessages ?? [])]
     this.persist = options.persist
+    this.persistedCount = this.messages.length
   }
 
   getMessages(): readonly TMessage[] {
@@ -25,10 +27,17 @@ export class PersistentTranscript<TMessage>
 
   append(message: TMessage): void {
     this.messages.push(message)
-    const snapshot = [...this.messages]
     this.pendingWrite = this.pendingWrite
       .catch(() => undefined)
-      .then(() => this.persist(snapshot))
+      .then(async () => {
+        const pendingMessages = this.messages.slice(this.persistedCount)
+        if (pendingMessages.length === 0) {
+          return
+        }
+
+        await this.persist(pendingMessages)
+        this.persistedCount += pendingMessages.length
+      })
   }
 
   async flush(): Promise<void> {

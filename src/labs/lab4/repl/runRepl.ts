@@ -93,9 +93,9 @@ export async function runRepl(): Promise<void> {
       return new PersistentTranscript<Message>({
         initialMessages: startup.initialMessages,
         persist: messages =>
-          sessionStore.save({
-            id: startup.sessionId,
-            transcript: [...messages],
+          sessionStore.appendMessages({
+            sessionId: startup.sessionId,
+            messages,
             createdAt: startup.createdAt,
             updatedAt: new Date().toISOString(),
           }),

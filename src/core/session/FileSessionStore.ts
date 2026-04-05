@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Message } from '../../base/types/message.ts'
 
@@ -17,27 +17,80 @@ export interface StoredSessionSummary {
   summary: string
 }
 
+interface StoredSessionMetadata extends StoredSessionSummary {
+  summarySourceRole?: Message['role']
+}
+
 export class FileSessionStore {
   constructor(private readonly rootDir: string) {}
 
   async load(sessionId: string): Promise<StoredSession | null> {
-    try {
-      const text = await readFile(this.getSessionPath(sessionId), 'utf8')
-      return JSON.parse(text) as StoredSession
-    } catch (error) {
-      if (isMissingFile(error)) {
-        return null
-      }
+    const metadata = await this.loadMetadata(sessionId)
+    if (!metadata) {
+      return null
+    }
 
-      throw error
+    return {
+      id: metadata.id,
+      transcript: await this.loadTranscriptLog(sessionId),
+      createdAt: metadata.createdAt,
+      updatedAt: metadata.updatedAt,
     }
   }
 
   async save(record: StoredSession): Promise<void> {
     await mkdir(this.rootDir, { recursive: true })
+    const metadata = buildMetadata(record)
+    const transcriptText = serializeTranscriptLog(record.transcript)
+
     await writeFile(
-      this.getSessionPath(record.id),
-      JSON.stringify(record, null, 2),
+      this.getMetadataPath(record.id),
+      JSON.stringify(metadata, null, 2),
+      'utf8',
+    )
+    await writeFile(
+      this.getTranscriptLogPath(record.id),
+      transcriptText,
+      'utf8',
+    )
+  }
+
+  async appendMessages(args: {
+    sessionId: string
+    messages: readonly Message[]
+    createdAt?: string
+    updatedAt: string
+  }): Promise<void> {
+    if (args.messages.length === 0) {
+      return
+    }
+
+    await mkdir(this.rootDir, { recursive: true })
+    let metadata =
+      (await this.loadMetadata(args.sessionId)) ?? {
+      id: args.sessionId,
+      createdAt: args.createdAt,
+      updatedAt: args.updatedAt,
+      messageCount: 0,
+      summary: '(empty session)',
+    }
+
+    await appendFile(
+      this.getTranscriptLogPath(args.sessionId),
+      serializeTranscriptLog(args.messages),
+      'utf8',
+    )
+
+    for (const message of args.messages) {
+      metadata = applyMessageToMetadata(metadata, message)
+    }
+
+    metadata.createdAt ??= args.createdAt
+    metadata.updatedAt = args.updatedAt
+
+    await writeFile(
+      this.getMetadataPath(args.sessionId),
+      JSON.stringify(metadata, null, 2),
       'utf8',
     )
   }
@@ -45,10 +98,17 @@ export class FileSessionStore {
   async list(): Promise<string[]> {
     try {
       const entries = await readdir(this.rootDir, { withFileTypes: true })
-      return entries
-        .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
-        .map(entry => decodeSessionId(entry.name.slice(0, -'.json'.length)))
-        .sort()
+      const sessionIds = new Set<string>()
+
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith(metadataSuffix)) {
+          sessionIds.add(
+            decodeSessionId(entry.name.slice(0, -metadataSuffix.length)),
+          )
+        }
+      }
+
+      return [...sessionIds].sort()
     } catch (error) {
       if (isMissingFile(error)) {
         return []
@@ -62,17 +122,17 @@ export class FileSessionStore {
     const sessionIds = await this.list()
     const records: Array<StoredSessionSummary | null> = await Promise.all(
       sessionIds.map(async (sessionId): Promise<StoredSessionSummary | null> => {
-        const record = await this.load(sessionId)
-        if (!record) {
+        const metadata = await this.loadMetadata(sessionId)
+        if (!metadata) {
           return null
         }
 
         return {
-          id: record.id,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-          messageCount: record.transcript.length,
-          summary: summarizeTranscript(record.transcript),
+          id: metadata.id,
+          createdAt: metadata.createdAt,
+          updatedAt: metadata.updatedAt,
+          messageCount: metadata.messageCount,
+          summary: metadata.summary,
         }
       }),
     )
@@ -91,10 +151,47 @@ export class FileSessionStore {
     return await this.load(latest.id)
   }
 
-  private getSessionPath(sessionId: string): string {
-    return join(this.rootDir, `${encodeSessionId(sessionId)}.json`)
+  private getMetadataPath(sessionId: string): string {
+    return join(this.rootDir, `${encodeSessionId(sessionId)}${metadataSuffix}`)
+  }
+
+  private getTranscriptLogPath(sessionId: string): string {
+    return join(this.rootDir, `${encodeSessionId(sessionId)}.jsonl`)
+  }
+
+  private async loadMetadata(
+    sessionId: string,
+  ): Promise<StoredSessionMetadata | null> {
+    try {
+      const text = await readFile(this.getMetadataPath(sessionId), 'utf8')
+      return JSON.parse(text) as StoredSessionMetadata
+    } catch (error) {
+      if (isMissingFile(error)) {
+        return null
+      }
+
+      throw error
+    }
+  }
+
+  private async loadTranscriptLog(sessionId: string): Promise<Message[]> {
+    try {
+      const text = await readFile(this.getTranscriptLogPath(sessionId), 'utf8')
+      return text
+        .split('\n')
+        .filter(line => line.length > 0)
+        .map(line => JSON.parse(line) as Message)
+    } catch (error) {
+      if (isMissingFile(error)) {
+        return []
+      }
+
+      throw error
+    }
   }
 }
+
+const metadataSuffix = '.meta.json'
 
 function compareSessionsByUpdatedAtDesc(
   left: StoredSessionSummary,
@@ -118,22 +215,73 @@ function compareSessionsByUpdatedAtDesc(
   return rightTime - leftTime
 }
 
-function summarizeTranscript(messages: readonly Message[]): string {
+function buildMetadata(record: StoredSession): StoredSessionMetadata {
+  const { summary, summarySourceRole } = summarizeTranscript(record.transcript)
+  return {
+    id: record.id,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    messageCount: record.transcript.length,
+    summary,
+    summarySourceRole,
+  }
+}
+
+function summarizeTranscript(
+  messages: readonly Message[],
+): { summary: string; summarySourceRole?: Message['role'] } {
   const preferredMessage =
     [...messages].reverse().find(message => message.role === 'user') ??
     [...messages].reverse().find(message => message.role === 'assistant') ??
     messages[messages.length - 1]
 
   if (!preferredMessage) {
-    return '(empty session)'
+    return { summary: '(empty session)' }
   }
 
-  const compact = preferredMessage.text.replace(/\s+/g, ' ').trim()
+  return {
+    summary: summarizeMessageText(preferredMessage.text),
+    summarySourceRole: preferredMessage.role,
+  }
+}
+
+function applyMessageToMetadata(
+  metadata: StoredSessionMetadata,
+  message: Message,
+): StoredSessionMetadata {
+  const shouldReplaceSummary =
+    message.role === 'user' ||
+    (message.role === 'assistant' && metadata.summarySourceRole !== 'user') ||
+    (message.role !== 'user' &&
+      message.role !== 'assistant' &&
+      metadata.summarySourceRole !== 'user' &&
+      metadata.summarySourceRole !== 'assistant')
+
+  return {
+    ...metadata,
+    messageCount: metadata.messageCount + 1,
+    summary: shouldReplaceSummary
+      ? summarizeMessageText(message.text)
+      : metadata.summary,
+    summarySourceRole: shouldReplaceSummary
+      ? message.role
+      : metadata.summarySourceRole,
+  }
+}
+
+function summarizeMessageText(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
   if (!compact) {
     return '(empty session)'
   }
 
   return compact.length > 80 ? `${compact.slice(0, 79)}…` : compact
+}
+
+function serializeTranscriptLog(messages: readonly Message[]): string {
+  return messages.map(message => JSON.stringify(message)).join('\n').concat(
+    messages.length > 0 ? '\n' : '',
+  )
 }
 
 function encodeSessionId(sessionId: string): string {

@@ -13,7 +13,7 @@ import {
   type StoredSessionMemory,
 } from '../../src/core/session/SessionMemoryStore.ts'
 
-test('FileSessionStore saves, loads, and lists sessions', async () => {
+test('FileSessionStore saves, appends, loads, and lists sessions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'claude-codex-session-store-'))
 
   try {
@@ -33,21 +33,27 @@ test('FileSessionStore saves, loads, and lists sessions', async () => {
       createdAt: '2026-01-01T00:00:01.000Z',
       updatedAt: '2026-01-01T00:00:02.000Z',
     })
+    await store.appendMessages({
+      sessionId: 'session-a',
+      messages: [createAssistantMessage('follow-up')],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:03.000Z',
+    })
 
     const loaded = await store.load('session-a')
     const summaries = await store.listSummaries()
     const latest = await store.loadLatest()
 
     expect(loaded?.id).toBe('session-a')
-    expect(loaded?.transcript).toHaveLength(2)
+    expect(loaded?.transcript).toHaveLength(3)
     expect(await store.list()).toEqual(['session-a', 'session-b'])
     expect(summaries.map(summary => summary.id)).toEqual([
-      'session-b',
       'session-a',
+      'session-b',
     ])
-    expect(summaries[0]?.summary).toBe('later')
-    expect(summaries[1]?.summary).toBe('hello')
-    expect(latest?.id).toBe('session-b')
+    expect(summaries[0]?.summary).toBe('hello')
+    expect(summaries[1]?.summary).toBe('later')
+    expect(latest?.id).toBe('session-a')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

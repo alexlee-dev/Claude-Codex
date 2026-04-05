@@ -75,18 +75,45 @@ test('lab4 starts a new session by default and persists transcript + memory', as
   expect(exitCode).toBe(0)
 
   const sessionFiles = await readdir(join(storageRoot, 'sessions'))
-  expect(sessionFiles).toHaveLength(1)
+  expect(sessionFiles).toHaveLength(2)
 
-  const sessionId = decodeURIComponent(sessionFiles[0]!.replace(/\.json$/, ''))
+  const metadataFile = sessionFiles.find(file => file.endsWith('.meta.json'))
+  const transcriptFile = sessionFiles.find(file => file.endsWith('.jsonl'))
+  expect(metadataFile).toBeDefined()
+  expect(transcriptFile).toBeDefined()
+
+  const sessionId = decodeURIComponent(
+    metadataFile!.replace(/\.meta\.json$/, ''),
+  )
   expect(sessionId).toMatch(/^\d{8}T\d{9}Z-[a-f0-9]{12}$/)
 
-  const transcriptPath = join(storageRoot, 'sessions', sessionFiles[0]!)
-  const memoryPath = join(storageRoot, 'session-memory', sessionFiles[0]!)
+  const transcriptPath = join(storageRoot, 'sessions', transcriptFile!)
+  const metadataPath = join(storageRoot, 'sessions', metadataFile!)
+  const memoryPath = join(
+    storageRoot,
+    'session-memory',
+    `${encodeURIComponent(sessionId)}.json`,
+  )
   const transcriptText = await readFile(transcriptPath, 'utf8')
+  const metadataText = await readFile(metadataPath, 'utf8')
   const memoryText = await readFile(memoryPath, 'utf8')
+  const transcriptMessages = transcriptText
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line) as { text: string })
+  const metadata = JSON.parse(metadataText) as {
+    messageCount: number
+    summary: string
+  }
 
-  expect(transcriptText).toContain('inspect the README greeting')
-  expect(transcriptText).toContain('I checked README.md and found the greeting.')
+  expect(transcriptMessages.map(message => message.text)).toContain(
+    'inspect the README greeting',
+  )
+  expect(transcriptMessages.map(message => message.text)).toContain(
+    'I checked README.md and found the greeting.',
+  )
+  expect(metadata.messageCount).toBe(transcriptMessages.length)
+  expect(metadata.summary).toBe('inspect the README greeting')
   expect(memoryText).toContain('# Current State')
   expect(memoryText).toContain('inspect the README greeting')
   expect(memoryText).toContain('summarizedThroughMessageId')
@@ -159,13 +186,26 @@ test('lab4 resume reuses the original session file', async () => {
   activeSessions.delete(resumedSession)
 
   const transcriptText = await readFile(
-    join(storageRoot, 'sessions', `${encodeURIComponent(sessionId)}.json`),
+    join(storageRoot, 'sessions', `${encodeURIComponent(sessionId)}.jsonl`),
     'utf8',
   )
-  expect(transcriptText).toContain('first request')
-  expect(transcriptText).toContain('first turn complete')
-  expect(transcriptText).toContain('second request')
-  expect(transcriptText).toContain('resumed turn complete')
+  const transcriptMessages = transcriptText
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line) as { text: string })
+
+  expect(transcriptMessages.map(message => message.text)).toContain(
+    'first request',
+  )
+  expect(transcriptMessages.map(message => message.text)).toContain(
+    'first turn complete',
+  )
+  expect(transcriptMessages.map(message => message.text)).toContain(
+    'second request',
+  )
+  expect(transcriptMessages.map(message => message.text)).toContain(
+    'resumed turn complete',
+  )
 })
 
 test('lab4 continue loads the most recently updated session', async () => {
@@ -178,34 +218,22 @@ test('lab4 continue loads the most recently updated session', async () => {
   const storageRoot = join(cwd, '.lab4-state')
   await mkdir(join(storageRoot, 'sessions'), { recursive: true })
 
-  await writeFile(
-    join(storageRoot, 'sessions', 'older.json'),
-    JSON.stringify(
-      {
-        id: 'older',
-        transcript: [{ id: 'm1', role: 'user', text: 'older turn' }],
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:01.000Z',
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
-  await writeFile(
-    join(storageRoot, 'sessions', 'newer.json'),
-    JSON.stringify(
-      {
-        id: 'newer',
-        transcript: [{ id: 'm2', role: 'user', text: 'newer turn' }],
-        createdAt: '2026-01-01T00:00:02.000Z',
-        updatedAt: '2026-01-01T00:00:03.000Z',
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
+  await writeSessionFiles({
+    storageRoot,
+    id: 'older',
+    transcript: [{ id: 'm1', role: 'user', text: 'older turn' }],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    summary: 'older turn',
+  })
+  await writeSessionFiles({
+    storageRoot,
+    id: 'newer',
+    transcript: [{ id: 'm2', role: 'user', text: 'newer turn' }],
+    createdAt: '2026-01-01T00:00:02.000Z',
+    updatedAt: '2026-01-01T00:00:03.000Z',
+    summary: 'newer turn',
+  })
 
   const session = spawnCliSession({
     cwd,
@@ -234,11 +262,11 @@ test('lab4 continue loads the most recently updated session', async () => {
   activeSessions.delete(session)
 
   const newerTranscript = await readFile(
-    join(storageRoot, 'sessions', 'newer.json'),
+    join(storageRoot, 'sessions', 'newer.jsonl'),
     'utf8',
   )
   const olderTranscript = await readFile(
-    join(storageRoot, 'sessions', 'older.json'),
+    join(storageRoot, 'sessions', 'older.jsonl'),
     'utf8',
   )
 
@@ -256,38 +284,26 @@ test('lab4 list-sessions prints saved sessions in updated order', async () => {
   const storageRoot = join(cwd, '.lab4-state')
   await mkdir(join(storageRoot, 'sessions'), { recursive: true })
 
-  await writeFile(
-    join(storageRoot, 'sessions', 'older.json'),
-    JSON.stringify(
-      {
-        id: 'older',
-        transcript: [
-          { id: 'm1', role: 'user', text: 'inspect older session state' },
-        ],
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:01.000Z',
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
-  await writeFile(
-    join(storageRoot, 'sessions', 'newer.json'),
-    JSON.stringify(
-      {
-        id: 'newer',
-        transcript: [
-          { id: 'm2', role: 'user', text: 'inspect newer session state' },
-        ],
-        createdAt: '2026-01-01T00:00:02.000Z',
-        updatedAt: '2026-01-01T00:00:03.000Z',
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
+  await writeSessionFiles({
+    storageRoot,
+    id: 'older',
+    transcript: [
+      { id: 'm1', role: 'user', text: 'inspect older session state' },
+    ],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    summary: 'inspect older session state',
+  })
+  await writeSessionFiles({
+    storageRoot,
+    id: 'newer',
+    transcript: [
+      { id: 'm2', role: 'user', text: 'inspect newer session state' },
+    ],
+    createdAt: '2026-01-01T00:00:02.000Z',
+    updatedAt: '2026-01-01T00:00:03.000Z',
+    summary: 'inspect newer session state',
+  })
 
   const session = spawnCliSession({
     cwd,
@@ -314,3 +330,35 @@ test('lab4 list-sessions prints saved sessions in updated order', async () => {
   )
   expect(session.stdout).not.toContain('you> ')
 })
+
+async function writeSessionFiles(args: {
+  storageRoot: string
+  id: string
+  transcript: Array<{ id: string; role: string; text: string }>
+  createdAt: string
+  updatedAt: string
+  summary: string
+}): Promise<void> {
+  const encodedId = encodeURIComponent(args.id)
+  await writeFile(
+    join(args.storageRoot, 'sessions', `${encodedId}.meta.json`),
+    JSON.stringify(
+      {
+        id: args.id,
+        createdAt: args.createdAt,
+        updatedAt: args.updatedAt,
+        messageCount: args.transcript.length,
+        summary: args.summary,
+        summarySourceRole: 'user',
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+  await writeFile(
+    join(args.storageRoot, 'sessions', `${encodedId}.jsonl`),
+    `${args.transcript.map(message => JSON.stringify(message)).join('\n')}\n`,
+    'utf8',
+  )
+}
