@@ -4,6 +4,7 @@ export interface SpawnCliSessionArgs {
   cwd: string
   entrypoint: string
   env?: NodeJS.ProcessEnv
+  args?: string[]
 }
 
 export interface CliSession {
@@ -16,7 +17,13 @@ export interface CliSession {
 }
 
 export function spawnCliSession(args: SpawnCliSessionArgs): CliSession {
-  const child = spawn(process.execPath, ['run', args.entrypoint], {
+  const childArgs = [
+    'run',
+    args.entrypoint,
+    ...(args.args && args.args.length > 0 ? ['--', ...args.args] : []),
+  ]
+
+  const child = spawn(process.execPath, childArgs, {
     cwd: args.cwd,
     env: {
       ...process.env,

@@ -102,3 +102,25 @@ test('lab2 CLI can search for alexlee and read the first matching file with mock
     'assistant> The first matching file is docs/alexlee-note.txt.',
   )
 })
+
+test('lab2 rejects unknown startup commands before entering the REPL', async () => {
+  const session = spawnCliSession({
+    cwd: repoRoot,
+    entrypoint: lab2Entrypoint,
+    args: ['--fooo'],
+    env: {
+      NO_COLOR: '1',
+    },
+  })
+  activeSessions.add(session)
+
+  const exitCode = await session.waitForExit()
+  activeSessions.delete(session)
+
+  expect(exitCode).not.toBe(0)
+  expect(session.stdout).not.toContain('you> ')
+  expect(session.stderr).toContain(
+    'error: Unknown startup command: --fooo',
+  )
+  expect(session.stderr).not.toContain('at runStartupCommand')
+})

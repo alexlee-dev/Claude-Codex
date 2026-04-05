@@ -24,14 +24,30 @@ test('FileSessionStore saves, loads, and lists sessions', async () => {
         createUserMessage('hello'),
         createAssistantMessage('hi'),
       ],
+      createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    await store.save({
+      id: 'session-b',
+      transcript: [createUserMessage('later')],
+      createdAt: '2026-01-01T00:00:01.000Z',
+      updatedAt: '2026-01-01T00:00:02.000Z',
     })
 
     const loaded = await store.load('session-a')
+    const summaries = await store.listSummaries()
+    const latest = await store.loadLatest()
 
     expect(loaded?.id).toBe('session-a')
     expect(loaded?.transcript).toHaveLength(2)
-    expect(await store.list()).toEqual(['session-a'])
+    expect(await store.list()).toEqual(['session-a', 'session-b'])
+    expect(summaries.map(summary => summary.id)).toEqual([
+      'session-b',
+      'session-a',
+    ])
+    expect(summaries[0]?.summary).toBe('later')
+    expect(summaries[1]?.summary).toBe('hello')
+    expect(latest?.id).toBe('session-b')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

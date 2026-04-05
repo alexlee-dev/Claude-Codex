@@ -9,7 +9,7 @@
 - persistent session-memory summary stored separately from the transcript
 - the same bounded edit + verify tool loop as `lab3`
 - memory-aware model context: earlier work can be summarized into session memory while recent raw messages stay verbatim
-- REPL with `/exit` and `/tools`
+- REPL with `/exit`, `/tools`, and session startup flags: `--new`, `--resume <id>`, `--list-sessions`
 
 ## Why it exists
 
@@ -31,6 +31,15 @@ From the repo root:
 bun install
 make login
 make lab4
+```
+
+Startup modes:
+
+```bash
+bun run lab4
+bun run lab4 --new
+bun run lab4 --resume <session-id>
+bun run lab4 --list-sessions
 ```
 
 ## Debug mode
@@ -62,4 +71,10 @@ By default, lab4 stores state under:
 .claude-codex/
   sessions/<session-id>.json
   session-memory/<session-id>.json
+```
+
+Session ids are generated as `timestamp-randomsuffix`, for example:
+
+```text
+20260405T131530123Z-8f3a1c2d4e5f
 ```

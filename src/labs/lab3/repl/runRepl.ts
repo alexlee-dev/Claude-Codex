@@ -1,8 +1,16 @@
 import { createLabRepl } from '../../../core/repl/createLabRepl.ts'
+import { runLabStartupCommand } from '../../runLabStartupCommand.ts'
 import { serializeToolTranscript as serializeTranscript } from '../../../core/model/serializeToolTranscript.ts'
 import { query } from '../query.ts'
 
 export async function runRepl(): Promise<void> {
+  const startup = await runLabStartupCommand({
+    labNumber: 3,
+  })
+  if (startup.handled && startup.result.type === 'exit') {
+    return
+  }
+
   await createLabRepl({
     labNumber: 3,
     systemPrompt:

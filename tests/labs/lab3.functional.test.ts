@@ -215,3 +215,25 @@ test('lab3 CLI refuses unapproved non-read tool calls', async () => {
   )
   expect(await readFile(join(cwd, 'README.md'), 'utf8')).toBe('hello world\n')
 })
+
+test('lab3 rejects unknown startup commands before entering the REPL', async () => {
+  const session = spawnCliSession({
+    cwd: fileURLToPath(new URL('../..', import.meta.url)),
+    entrypoint: lab3Entrypoint,
+    args: ['--fooo'],
+    env: {
+      NO_COLOR: '1',
+    },
+  })
+  activeSessions.add(session)
+
+  const exitCode = await session.waitForExit()
+  activeSessions.delete(session)
+
+  expect(exitCode).not.toBe(0)
+  expect(session.stdout).not.toContain('you> ')
+  expect(session.stderr).toContain(
+    'error: Unknown startup command: --fooo',
+  )
+  expect(session.stderr).not.toContain('at runStartupCommand')
+})

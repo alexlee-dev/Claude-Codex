@@ -1,9 +1,14 @@
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { PersistentTranscript } from '../../../base/transcript/PersistentTranscript.ts'
 import type { Message } from '../../../base/types/message.ts'
 import { serializeToolTranscript as serializeTranscript } from '../../../core/model/serializeToolTranscript.ts'
 import { createLabRepl } from '../../../core/repl/createLabRepl.ts'
-import { FileSessionStore } from '../../../core/session/FileSessionStore.ts'
+import {
+  FileSessionStore,
+} from '../../../core/session/FileSessionStore.ts'
+import { runLabStartupCommand } from '../../runLabStartupCommand.ts'
+import type { Lab4StartupSelection } from '../cli/index.ts'
 import { SessionMemoryStore } from '../../../core/session/SessionMemoryStore.ts'
 import { query } from '../query.ts'
 import {
@@ -13,13 +18,37 @@ import {
   shouldRefreshSessionMemory,
 } from '../sessionMemory.ts'
 
+type StartupMode = 'new' | 'resume' | 'continue'
+
+type StartupState = {
+  mode: StartupMode
+  sessionId: string
+  createdAt: string
+  initialMessages: readonly Message[]
+}
+
 export async function runRepl(): Promise<void> {
   const cwd = process.cwd()
-  const sessionId = process.env.LAB4_SESSION_ID ?? 'default'
   const storageRoot =
     process.env.LAB4_STORAGE_ROOT ?? join(cwd, '.claude-codex')
   const sessionStore = new FileSessionStore(join(storageRoot, 'sessions'))
   const memoryStore = new SessionMemoryStore(join(storageRoot, 'session-memory'))
+  const startupCommand = await runLabStartupCommand<Lab4StartupSelection>({
+    labNumber: 4,
+    cwd,
+  })
+  if (startupCommand.handled && startupCommand.result.type === 'exit') {
+    return
+  }
+
+  const startup = await resolveStartupState({
+    sessionStore,
+    sessionIdOverride: process.env.LAB4_SESSION_ID,
+    selection:
+      startupCommand.handled && startupCommand.result.type === 'continue'
+        ? startupCommand.result.value
+        : undefined,
+  })
   const memoryOptions = {
     minMessagesForSummary: readPositiveInt(
       process.env.LAB4_MEMORY_MIN_MESSAGES,
@@ -56,18 +85,18 @@ export async function runRepl(): Promise<void> {
     query,
     mockEnvVar: 'LAB4_MOCK_RESPONSES',
     maxStepsEnvVar: 'LAB4_MAX_STEPS',
-    bannerMode: 'repo agent · durable session memory',
+    bannerMode: `repo agent · durable session memory · ${startup.mode}`,
     serializeTranscript,
     defaultMaxSteps: 6,
-    title: `Claude Codex · ${sessionId}`,
+    title: `Claude Codex · ${startup.sessionId}`,
     async createTranscript() {
-      const stored = await sessionStore.load(sessionId)
       return new PersistentTranscript<Message>({
-        initialMessages: stored?.transcript ?? [],
+        initialMessages: startup.initialMessages,
         persist: messages =>
           sessionStore.save({
-            id: sessionId,
+            id: startup.sessionId,
             transcript: [...messages],
+            createdAt: startup.createdAt,
             updatedAt: new Date().toISOString(),
           }),
       })
@@ -79,14 +108,14 @@ export async function runRepl(): Promise<void> {
       }
 
       const messages = transcript.getMessages()
-      const existingMemory = await memoryStore.load(sessionId)
+      const existingMemory = await memoryStore.load(startup.sessionId)
       if (!shouldRefreshSessionMemory(messages, existingMemory, memoryOptions)) {
         return
       }
 
       const nextMemory = buildSessionMemory(
         {
-          sessionId,
+          sessionId: startup.sessionId,
           messages,
           existingMemory,
         },
@@ -107,7 +136,7 @@ export async function runRepl(): Promise<void> {
         prepareMessages: async ({ messages }: { messages: readonly Message[] }) =>
           assembleSessionMemoryContext(
             messages,
-            await memoryStore.load(sessionId),
+            await memoryStore.load(startup.sessionId),
             {
               preserveRecentMessages: memoryOptions.preserveRecentMessages,
             },
@@ -120,6 +149,62 @@ export async function runRepl(): Promise<void> {
 function readPositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value ?? String(fallback))
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+async function resolveStartupState(args: {
+  sessionStore: FileSessionStore
+  sessionIdOverride?: string
+  selection?: Lab4StartupSelection
+}): Promise<StartupState> {
+  const command = args.selection ?? { mode: 'new' }
+
+  if (command.mode === 'continue') {
+    const latest = await args.sessionStore.loadLatest()
+    if (!latest) {
+      throw new Error('No saved lab4 sessions found for continue.')
+    }
+
+    return {
+      mode: 'continue',
+      sessionId: latest.id,
+      createdAt: latest.createdAt ?? latest.updatedAt,
+      initialMessages: latest.transcript,
+    }
+  }
+
+  if (command.mode === 'resume') {
+    const record = await args.sessionStore.load(command.sessionId)
+    if (!record) {
+      throw new Error(`Session not found: ${command.sessionId}`)
+    }
+
+    return {
+      mode: 'resume',
+      sessionId: record.id,
+      createdAt: record.createdAt ?? record.updatedAt,
+      initialMessages: record.transcript,
+    }
+  }
+
+  const sessionId = args.sessionIdOverride ?? generateSessionId()
+  if (await args.sessionStore.load(sessionId)) {
+    throw new Error(
+      `Cannot create a new session because "${sessionId}" already exists.`,
+    )
+  }
+
+  return {
+    mode: 'new',
+    sessionId,
+    createdAt: new Date().toISOString(),
+    initialMessages: [],
+  }
+}
+
+function generateSessionId(now: Date = new Date()): string {
+  const timestamp = now.toISOString().replaceAll(/[-:.]/g, '')
+  const randomSuffix = randomUUID().replaceAll('-', '').slice(0, 12)
+  return `${timestamp}-${randomSuffix}`
 }
 
 await runRepl()

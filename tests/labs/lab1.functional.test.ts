@@ -65,3 +65,22 @@ test('lab1 CLI supports a 3-turn conversation with the mock backend', async () =
   expect(session.stdout).toContain('assistant> mock reply 3')
   expect(session.stdout).toContain('bye')
 })
+
+test('lab1 --foo prints a startup marker and exits', async () => {
+  const session = spawnCliSession({
+    cwd: repoRoot,
+    entrypoint: './src/labs/lab1/repl/runRepl.ts',
+    args: ['--foo'],
+    env: {
+      NO_COLOR: '1',
+    },
+  })
+  activeSessions.add(session)
+
+  const exitCode = await session.waitForExit()
+  activeSessions.delete(session)
+
+  expect(exitCode).toBe(0)
+  expect(session.stdout).toContain('lab1 foo')
+  expect(session.stdout).not.toContain('you> ')
+})
