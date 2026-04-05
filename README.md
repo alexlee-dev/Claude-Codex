@@ -17,6 +17,7 @@ Starting in `lab3`, Claude-Codex can already do a rough version of real coding w
 - `lab1`: multi-turn chat over a local transcript, backed by the official Codex CLI package, default model `gpt-5.4-mini`, default reasoning effort `low`
 - `lab2`: minimal read-only repository agent with `read_file` and `search_code` tools
 - `lab3`: a minimal coding agent that can inspect the repo, make bounded edits, and run a small allowlist of verification commands
+- `lab4`: the lab3 agent plus durable sessions, persistent transcripts, and a first-pass session memory layer
 
 ## Quick start
 
@@ -26,6 +27,7 @@ make login
 make lab1
 make lab2
 make lab3
+make lab4
 ```
 
 Debug mode:

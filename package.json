@@ -12,6 +12,8 @@
     "lab2:debug": "DEBUG=1 bun run ./src/labs/lab2/repl/runRepl.ts",
     "lab3": "bun run ./src/labs/lab3/repl/runRepl.ts",
     "lab3:debug": "DEBUG=1 bun run ./src/labs/lab3/repl/runRepl.ts",
+    "lab4": "bun run ./src/labs/lab4/repl/runRepl.ts",
+    "lab4:debug": "DEBUG=1 bun run ./src/labs/lab4/repl/runRepl.ts",
     "start": "bun run ./src/labs/lab1/repl/runRepl.ts",
     "test": "bun test",
     "typecheck": "bun x tsc --noEmit",

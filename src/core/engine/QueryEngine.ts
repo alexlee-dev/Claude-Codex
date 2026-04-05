@@ -24,6 +24,10 @@ export interface QueryEngineOptions<
   query: QueryFunction<TMessage, TEvent, TQueryOptions>
   createUserMessage: (text: string) => TMessage
   queryOptions?: TQueryOptions
+  afterSubmit?: (args: {
+    submittedText: string
+    transcript: Transcript<TMessage>
+  }) => Promise<void>
 }
 
 export class QueryEngine<
@@ -38,6 +42,12 @@ export class QueryEngine<
   private readonly query: QueryFunction<TMessage, TEvent, TQueryOptions>
   private readonly createUserMessage: (text: string) => TMessage
   private readonly queryOptions: TQueryOptions
+  private readonly afterSubmit?:
+    | ((args: {
+        submittedText: string
+        transcript: Transcript<TMessage>
+      }) => Promise<void>)
+    | undefined
 
   constructor(options: QueryEngineOptions<TMessage, TEvent, TQueryOptions>) {
     this.transcript = options.transcript
@@ -47,6 +57,7 @@ export class QueryEngine<
     this.query = options.query
     this.createUserMessage = options.createUserMessage
     this.queryOptions = (options.queryOptions ?? {}) as TQueryOptions
+    this.afterSubmit = options.afterSubmit
   }
 
   getTranscript(): Transcript<TMessage> {
@@ -62,6 +73,11 @@ export class QueryEngine<
       systemPrompt: this.systemPrompt,
       model: this.model,
       ...this.queryOptions,
+    })
+
+    await this.afterSubmit?.({
+      submittedText: text,
+      transcript: this.transcript,
     })
   }
 }

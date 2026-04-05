@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { basename } from 'node:path'
 import type { CodexDebugEvent } from './codexDebug.ts'
 import {
   flushLines,
@@ -17,31 +18,19 @@ export interface RunCodexExecOptions {
 export async function runCodexExec(
   options: RunCodexExecOptions,
 ): Promise<string> {
-  const args = [
-    'x',
-    'codex',
-    'exec',
-    '--skip-git-repo-check',
-    '--config',
-    `model_reasoning_effort="${options.reasoningEffort ?? 'low'}"`,
-    '--sandbox',
-    'read-only',
-    '--color',
-    'never',
-    '--json',
-    '--ephemeral',
-  ]
+  const command = buildCodexCommand(options)
 
   if (options.model) {
-    args.push('--model', options.model)
+    command.args.push('--model', options.model)
   }
 
-  args.push(options.prompt)
+  command.args.push('-')
 
   return await runCommand({
-    cmd: options.codexBin ?? 'bun',
-    args,
+    cmd: command.cmd,
+    args: command.args,
     cwd: options.cwd ?? process.cwd(),
+    stdinText: options.prompt,
     onDebugEvent: options.onDebugEvent,
   })
 }
@@ -50,6 +39,7 @@ async function runCommand(args: {
   cmd: string
   args: string[]
   cwd: string
+  stdinText?: string
   onDebugEvent?: (event: CodexDebugEvent) => void
 }): Promise<string> {
   const debugEnabled = Boolean(args.onDebugEvent)
@@ -57,7 +47,7 @@ async function runCommand(args: {
   return await new Promise<string>((resolve, reject) => {
     const child = spawn(args.cmd, args.args, {
       cwd: args.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
     })
 
@@ -102,6 +92,10 @@ async function runCommand(args: {
       })
     }
 
+    if (child.stdin) {
+      child.stdin.end(args.stdinText ?? '')
+    }
+
     child.on('error', reject)
     child.on('close', code => {
       flushTrailingLine(stdoutBuffer, line => {
@@ -139,6 +133,41 @@ async function runCommand(args: {
       )
     })
   })
+}
+
+function buildCodexCommand(options: RunCodexExecOptions): {
+  cmd: string
+  args: string[]
+} {
+  const cmd = options.codexBin ?? 'bun'
+  const execArgs = [
+    '--skip-git-repo-check',
+    '--config',
+    `model_reasoning_effort="${options.reasoningEffort ?? 'low'}"`,
+    '--sandbox',
+    'read-only',
+    '--color',
+    'never',
+    '--json',
+    '--ephemeral',
+  ]
+
+  if (isBunCommand(cmd)) {
+    return {
+      cmd,
+      args: ['x', 'codex', 'exec', ...execArgs],
+    }
+  }
+
+  return {
+    cmd,
+    args: ['exec', ...execArgs],
+  }
+}
+
+function isBunCommand(cmd: string): boolean {
+  const name = basename(cmd).toLowerCase()
+  return name === 'bun' || name === 'bun.exe'
 }
 
 function extractAssistantMessageText(line: string): string | undefined {

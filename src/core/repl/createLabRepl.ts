@@ -11,6 +11,7 @@ import { InMemoryTranscript } from '../../base/transcript/InMemoryTranscript.ts'
 import type { AgentEvent } from '../../base/types/agent.ts'
 import type { Message } from '../../base/types/message.ts'
 import type { ModelClient } from '../../base/types/model.ts'
+import type { Transcript } from '../../base/types/transcript.ts'
 import {
   createAssistantMessage,
   createUserMessage,
@@ -41,6 +42,11 @@ export interface CreateLabReplOptions<TQueryOptions extends object> {
   defaultMaxSteps?: number
   includeToolCatalog?: boolean
   title?: string
+  createTranscript?: () => Transcript<Message> | Promise<Transcript<Message>>
+  afterSubmit?: (args: {
+    transcript: Transcript<Message>
+    submittedText: string
+  }) => Promise<void>
   createQueryOptions?: (args: {
     tools: Tool[]
     cwd: string
@@ -87,7 +93,8 @@ export async function createLabRepl<TQueryOptions extends object>(
       | undefined
   } = {}
 
-  const transcript = new InMemoryTranscript<Message>()
+  const transcript =
+    (await options.createTranscript?.()) ?? new InMemoryTranscript<Message>()
   const session = new QueryEngine({
     transcript,
     modelClient: createModelClientFromEnv({
@@ -113,6 +120,7 @@ export async function createLabRepl<TQueryOptions extends object>(
     }) ??
       {}) as TQueryOptions,
     systemPrompt,
+    afterSubmit: options.afterSubmit,
   })
 
   await runReplSession({

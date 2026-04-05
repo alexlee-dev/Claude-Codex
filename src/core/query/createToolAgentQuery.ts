@@ -22,6 +22,9 @@ export interface ToolAgentQueryArgs {
   cwd?: string
   maxSteps?: number
   requestToolApproval?: (request: ToolApprovalRequest) => Promise<boolean>
+  prepareMessages?: (args: {
+    messages: readonly Message[]
+  }) => readonly Message[] | Promise<readonly Message[]>
 }
 
 type AgentAction =
@@ -56,9 +59,14 @@ export function createToolAgentQuery(options: {
     const toolMap = new Map(tools.map(tool => [tool.name, tool]))
 
     for (let step = 0; step < maxSteps; step += 1) {
+      const preparedMessages =
+        (await args.prepareMessages?.({
+          messages: transcript.getMessages(),
+        })) ?? transcript.getMessages()
+
       const response = await modelClient.generate({
         systemPrompt,
-        messages: transcript.getMessages(),
+        messages: preparedMessages,
         model,
       })
 
