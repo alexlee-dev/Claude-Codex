@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Message } from '../types/message.ts'
+import type { Message, MessageArtifact } from '../types/message.ts'
 
 export function createUserMessage(text: string): Message {
   return {
@@ -25,11 +25,19 @@ export function createSystemMessage(text: string): Message {
   }
 }
 
-export function createToolMessage(name: string, text: string): Message {
+export function createToolMessage(
+  name: string,
+  text: string,
+  options?: {
+    id?: string
+    artifact?: MessageArtifact
+  },
+): Message {
   return {
-    id: randomUUID(),
+    id: options?.id ?? randomUUID(),
     role: 'tool',
     name,
     text,
+    artifact: options?.artifact,
   }
 }

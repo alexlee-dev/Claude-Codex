@@ -8,6 +8,7 @@ import {
   FileSessionStore,
 } from '../../../core/session/FileSessionStore.ts'
 import { runLabStartupCommand } from '../../runLabStartupCommand.ts'
+import { createLabToolResultMaterializer } from '../../lab3/toolResultArtifacts.ts'
 import type { Lab4StartupSelection } from '../cli/index.ts'
 import { SessionMemoryStore } from '../../../core/session/SessionMemoryStore.ts'
 import { query } from '../query.ts'
@@ -133,6 +134,9 @@ export async function runRepl(): Promise<void> {
         cwd,
         maxSteps,
         requestToolApproval,
+        materializeToolResult: createLabToolResultMaterializer({
+          scopeId: startup.sessionId,
+        }),
         prepareMessages: async ({ messages }: { messages: readonly Message[] }) =>
           assembleSessionMemoryContext(
             messages,

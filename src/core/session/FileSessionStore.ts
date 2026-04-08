@@ -21,6 +21,12 @@ interface StoredSessionMetadata extends StoredSessionSummary {
   summarySourceRole?: Message['role']
 }
 
+interface SessionTranscriptMessageRecordV1 {
+  type: 'message'
+  version: 1
+  message: Message
+}
+
 export class FileSessionStore {
   constructor(private readonly rootDir: string) {}
 
@@ -180,7 +186,7 @@ export class FileSessionStore {
       return text
         .split('\n')
         .filter(line => line.length > 0)
-        .map(line => JSON.parse(line) as Message)
+        .map(parseTranscriptLogLine)
     } catch (error) {
       if (isMissingFile(error)) {
         return []
@@ -249,13 +255,14 @@ function applyMessageToMetadata(
   metadata: StoredSessionMetadata,
   message: Message,
 ): StoredSessionMetadata {
+  const { role } = message
+  const { summarySourceRole } = metadata
   const shouldReplaceSummary =
-    message.role === 'user' ||
-    (message.role === 'assistant' && metadata.summarySourceRole !== 'user') ||
-    (message.role !== 'user' &&
-      message.role !== 'assistant' &&
-      metadata.summarySourceRole !== 'user' &&
-      metadata.summarySourceRole !== 'assistant')
+    role === 'user' ||
+    (role === 'assistant' && summarySourceRole !== 'user') ||
+    ((role === 'tool' || role === 'system') &&
+      summarySourceRole !== 'user' &&
+      summarySourceRole !== 'assistant')
 
   return {
     ...metadata,
@@ -279,9 +286,35 @@ function summarizeMessageText(text: string): string {
 }
 
 function serializeTranscriptLog(messages: readonly Message[]): string {
-  return messages.map(message => JSON.stringify(message)).join('\n').concat(
-    messages.length > 0 ? '\n' : '',
-  )
+  return messages
+    .map(message => JSON.stringify(createTranscriptMessageRecord(message)))
+    .join('\n')
+    .concat(messages.length > 0 ? '\n' : '')
+}
+
+function createTranscriptMessageRecord(
+  message: Message,
+): SessionTranscriptMessageRecordV1 {
+  return {
+    type: 'message',
+    version: 1,
+    message,
+  }
+}
+
+function parseTranscriptLogLine(line: string): Message {
+  const parsed = JSON.parse(line) as unknown
+
+  if (isTranscriptMessageRecordV1(parsed)) {
+    return parsed.message
+  }
+
+  if (isMessage(parsed)) {
+    // Backward compatibility for session logs written before typed envelopes.
+    return parsed
+  }
+
+  throw new Error('Invalid session transcript record')
 }
 
 function encodeSessionId(sessionId: string): string {
@@ -298,5 +331,55 @@ function isMissingFile(error: unknown): boolean {
     error !== null &&
     'code' in error &&
     error.code === 'ENOENT'
+  )
+}
+
+function isTranscriptMessageRecordV1(
+  value: unknown,
+): value is SessionTranscriptMessageRecordV1 {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'message' &&
+    'version' in value &&
+    value.version === 1 &&
+    'message' in value &&
+    isMessage(value.message)
+  )
+}
+
+function isMessage(value: unknown): value is Message {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    typeof value.id === 'string' &&
+    'role' in value &&
+    (value.role === 'system' ||
+      value.role === 'user' ||
+      value.role === 'assistant' ||
+      value.role === 'tool') &&
+    'text' in value &&
+    typeof value.text === 'string' &&
+    (!('name' in value) ||
+      value.name === undefined ||
+      typeof value.name === 'string') &&
+    (!('artifact' in value) ||
+      value.artifact === undefined ||
+      isMessageArtifact(value.artifact))
+  )
+}
+
+function isMessageArtifact(value: unknown): value is NonNullable<Message['artifact']> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'kind' in value &&
+    value.kind === 'tool_result' &&
+    'relativePath' in value &&
+    typeof value.relativePath === 'string' &&
+    'byteLength' in value &&
+    typeof value.byteLength === 'number'
   )
 }

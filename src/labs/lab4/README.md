@@ -8,8 +8,9 @@
 - file-backed session transcript
 - persistent session-memory summary stored separately from the transcript
 - the same bounded edit + verify tool loop as `lab3`
+- artifact-backed tool results for large `search_code`, `run_command`, and `replace_in_file` outputs
 - memory-aware model context: earlier work can be summarized into session memory while recent raw messages stay verbatim
-- REPL with `/exit`, `/tools`, and session startup flags: `--new`, `--resume <id>`, `--list-sessions`
+- REPL with `/exit`, `/tools`, and session startup flags: `--new`, `--resume <id>`, `--continue`, `--list-sessions`
 
 ## Why it exists
 
@@ -38,6 +39,7 @@ Startup modes:
 ```bash
 bun run lab4
 bun run lab4 --new
+bun run lab4 --continue
 bun run lab4 --resume <session-id>
 bun run lab4 --list-sessions
 ```
@@ -61,6 +63,9 @@ make lab4-debug
 - `LAB4_MEMORY_MIN_MESSAGES`
 - `LAB4_MEMORY_MIN_MESSAGES_BETWEEN_UPDATES`
 - `LAB4_MEMORY_PRESERVE_RECENT_MESSAGES`
+- `LAB3_SEARCH_CODE_MAX_INLINE_CHARS`
+- `LAB3_RUN_COMMAND_MAX_INLINE_CHARS`
+- `LAB3_REPLACE_IN_FILE_MAX_INLINE_CHARS`
 - `DEBUG=1`
 
 ## Storage layout
@@ -69,6 +74,7 @@ By default, lab4 stores state under:
 
 ```text
 .claude-codex/
+  tool-results/<scope-id>/<message-id>.txt
   sessions/<session-id>.json
   session-memory/<session-id>.json
 ```

@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto'
 import { createLabRepl } from '../../../core/repl/createLabRepl.ts'
 import { runLabStartupCommand } from '../../runLabStartupCommand.ts'
 import { serializeToolTranscript as serializeTranscript } from '../../../core/model/serializeToolTranscript.ts'
 import { query } from '../query.ts'
+import { createLabToolResultMaterializer } from '../toolResultArtifacts.ts'
 
 export async function runRepl(): Promise<void> {
+  const artifactScopeId = `lab3-${randomUUID().replaceAll('-', '').slice(0, 12)}`
   const startup = await runLabStartupCommand({
     labNumber: 3,
   })
@@ -35,7 +38,15 @@ export async function runRepl(): Promise<void> {
     serializeTranscript,
     defaultMaxSteps: 6,
     createQueryOptions({ tools, cwd, maxSteps, requestToolApproval }) {
-      return { tools, cwd, maxSteps, requestToolApproval }
+      return {
+        tools,
+        cwd,
+        maxSteps,
+        requestToolApproval,
+        materializeToolResult: createLabToolResultMaterializer({
+          scopeId: artifactScopeId,
+        }),
+      }
     },
   })
 }

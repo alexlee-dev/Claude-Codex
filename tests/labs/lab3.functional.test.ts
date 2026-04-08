@@ -1,5 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -237,3 +244,166 @@ test('lab3 rejects unknown startup commands before entering the REPL', async () 
   )
   expect(session.stderr).not.toContain('at runStartupCommand')
 })
+
+test('lab3 externalizes large search_code results and read_file can read the artifact back', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'lab3-artifact-search-'))
+  tempDirs.push(cwd)
+
+  await mkdir(join(cwd, 'src'), { recursive: true })
+  await writeFile(
+    join(cwd, 'src', 'big.txt'),
+    Array.from({ length: 120 }, (_, index) => `artifact-match line ${index}`)
+      .join('\n') + '\n',
+    'utf8',
+  )
+
+  const session = spawnCliSession({
+    cwd,
+    entrypoint: lab3Entrypoint,
+    env: {
+      NO_COLOR: '1',
+      LAB3_MODEL_BACKEND: 'mock',
+      LAB3_SEARCH_CODE_MAX_INLINE_CHARS: '120',
+      LAB3_MOCK_RESPONSES: JSON.stringify([
+        '{"type":"tool_call","tool":"search_code","input":{"query":"artifact-match"}}',
+        '{"type":"final","text":"search complete"}',
+      ]),
+    },
+  })
+  activeSessions.add(session)
+
+  await session.waitForOutput(() => session.stdout.includes('you> '))
+  session.write('search for artifact-match\n')
+
+  await session.waitForOutput(() =>
+    session.stdout.includes('[full tool result stored separately]'),
+  )
+  await session.waitForOutput(() =>
+    session.stdout.includes('assistant> search complete'),
+  )
+
+  session.write('/exit\n')
+  expect(await session.waitForExit()).toBe(0)
+  activeSessions.delete(session)
+
+  expect(session.stdout).not.toContain('artifact-match line 119')
+
+  const artifactRelativePath = await findSingleArtifactRelativePath(cwd)
+  const artifactText = await readFile(join(cwd, artifactRelativePath), 'utf8')
+
+  expect(artifactText).toContain('artifact-match line 119')
+
+  const readBackSession = spawnCliSession({
+    cwd,
+    entrypoint: lab3Entrypoint,
+    env: {
+      NO_COLOR: '1',
+      LAB3_MODEL_BACKEND: 'mock',
+      LAB3_MOCK_RESPONSES: JSON.stringify([
+        `{"type":"tool_call","tool":"read_file","input":{"path":"${artifactRelativePath}"}}`,
+        '{"type":"final","text":"artifact loaded"}',
+      ]),
+    },
+  })
+  activeSessions.add(readBackSession)
+
+  await readBackSession.waitForOutput(() => readBackSession.stdout.includes('you> '))
+  readBackSession.write('read the stored artifact\n')
+  await readBackSession.waitForOutput(() =>
+    readBackSession.stdout.includes(`tool:read_file> {"path":"${artifactRelativePath}"}`),
+  )
+  await readBackSession.waitForOutput(() =>
+    readBackSession.stdout.includes('artifact-match line 119'),
+  )
+  await readBackSession.waitForOutput(() =>
+    readBackSession.stdout.includes('assistant> artifact loaded'),
+  )
+
+  readBackSession.write('/exit\n')
+  expect(await readBackSession.waitForExit()).toBe(0)
+  activeSessions.delete(readBackSession)
+})
+
+test('lab3 externalizes large run_command results but keeps read_file inline', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'lab3-artifact-run-command-'))
+  tempDirs.push(cwd)
+
+  await writeFile(
+    join(cwd, 'big-output.txt'),
+    Array.from({ length: 90 }, (_, index) => `command-output line ${index}`)
+      .join('\n') + '\n',
+    'utf8',
+  )
+  await writeFile(join(cwd, 'README.md'), 'inline read file\n'.repeat(30), 'utf8')
+
+  const commandSession = spawnCliSession({
+    cwd,
+    entrypoint: lab3Entrypoint,
+    env: {
+      NO_COLOR: '1',
+      LAB3_MODEL_BACKEND: 'mock',
+      LAB3_RUN_COMMAND_MAX_INLINE_CHARS: '120',
+      LAB3_MOCK_RESPONSES: JSON.stringify([
+        '{"type":"tool_call","tool":"run_command","input":{"command":"cat","args":["big-output.txt"]}}',
+        '{"type":"final","text":"command checked"}',
+      ]),
+    },
+  })
+  activeSessions.add(commandSession)
+
+  await commandSession.waitForOutput(() => commandSession.stdout.includes('you> '))
+  commandSession.write('show the big command output\n')
+  await commandSession.waitForOutput(() =>
+    commandSession.stdout.includes('approval required for run_command'),
+  )
+  commandSession.write('1\n')
+  await commandSession.waitForOutput(() =>
+    commandSession.stdout.includes('[full tool result stored separately]'),
+  )
+  await commandSession.waitForOutput(() =>
+    commandSession.stdout.includes('assistant> command checked'),
+  )
+  commandSession.write('/exit\n')
+  expect(await commandSession.waitForExit()).toBe(0)
+  activeSessions.delete(commandSession)
+
+  const readFileSession = spawnCliSession({
+    cwd,
+    entrypoint: lab3Entrypoint,
+    env: {
+      NO_COLOR: '1',
+      LAB3_MODEL_BACKEND: 'mock',
+      LAB3_RUN_COMMAND_MAX_INLINE_CHARS: '120',
+      LAB3_MOCK_RESPONSES: JSON.stringify([
+        '{"type":"tool_call","tool":"read_file","input":{"path":"README.md"}}',
+        '{"type":"final","text":"read complete"}',
+      ]),
+    },
+  })
+  activeSessions.add(readFileSession)
+
+  await readFileSession.waitForOutput(() => readFileSession.stdout.includes('you> '))
+  readFileSession.write('read the readme\n')
+  await readFileSession.waitForOutput(() =>
+    readFileSession.stdout.includes('tool:result:read_file> FILE: README.md'),
+  )
+  await readFileSession.waitForOutput(() =>
+    readFileSession.stdout.includes('inline read file'),
+  )
+
+  expect(readFileSession.stdout).not.toContain('[full tool result stored separately]')
+
+  readFileSession.write('/exit\n')
+  expect(await readFileSession.waitForExit()).toBe(0)
+  activeSessions.delete(readFileSession)
+})
+
+async function findSingleArtifactRelativePath(cwd: string): Promise<string> {
+  const scopes = await readdir(join(cwd, '.claude-codex', 'tool-results'))
+  expect(scopes).toHaveLength(1)
+
+  const files = await readdir(join(cwd, '.claude-codex', 'tool-results', scopes[0]!))
+  expect(files).toHaveLength(1)
+
+  return join('.claude-codex', 'tool-results', scopes[0]!, files[0]!)
+}

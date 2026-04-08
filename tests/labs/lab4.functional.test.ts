@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Message } from '../../src/base/types/message.ts'
 import type { CliSession } from '../base/spawnCliSession.ts'
 import { spawnCliSession } from '../base/spawnCliSession.ts'
 
@@ -97,10 +98,7 @@ test('lab4 starts a new session by default and persists transcript + memory', as
   const transcriptText = await readFile(transcriptPath, 'utf8')
   const metadataText = await readFile(metadataPath, 'utf8')
   const memoryText = await readFile(memoryPath, 'utf8')
-  const transcriptMessages = transcriptText
-    .trim()
-    .split('\n')
-    .map(line => JSON.parse(line) as { text: string })
+  const transcriptMessages = parseTranscriptMessages(transcriptText)
   const metadata = JSON.parse(metadataText) as {
     messageCount: number
     summary: string
@@ -189,10 +187,7 @@ test('lab4 resume reuses the original session file', async () => {
     join(storageRoot, 'sessions', `${encodeURIComponent(sessionId)}.jsonl`),
     'utf8',
   )
-  const transcriptMessages = transcriptText
-    .trim()
-    .split('\n')
-    .map(line => JSON.parse(line) as { text: string })
+  const transcriptMessages = parseTranscriptMessages(transcriptText)
 
   expect(transcriptMessages.map(message => message.text)).toContain(
     'first request',
@@ -330,6 +325,154 @@ test('lab4 list-sessions prints saved sessions in updated order', async () => {
   )
   expect(session.stdout).not.toContain('you> ')
 })
+
+test(
+  'lab4 persists preview-only artifact-backed tool results across resume and session memory',
+  async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'lab4-artifact-resume-'))
+  tempDirs.push(cwd)
+
+  const originalText = Array.from(
+    { length: 80 },
+    (_, index) => `replace-old line ${index}`,
+  ).join('\n')
+  const updatedText = Array.from(
+    { length: 80 },
+    (_, index) => `replace-new line ${index}`,
+  ).join('\n')
+
+  await writeFile(join(cwd, 'README.md'), `${originalText}\n`, 'utf8')
+
+  const storageRoot = join(cwd, '.lab4-state')
+  const sessionId = 'artifact-resume'
+
+  const initialSession = spawnCliSession({
+    cwd,
+    entrypoint: lab4Entrypoint,
+    env: {
+      NO_COLOR: '1',
+      LAB4_MODEL_BACKEND: 'mock',
+      LAB4_SESSION_ID: sessionId,
+      LAB4_STORAGE_ROOT: storageRoot,
+      LAB4_MEMORY_MIN_MESSAGES: '1',
+      LAB4_MEMORY_MIN_MESSAGES_BETWEEN_UPDATES: '1',
+      LAB4_MEMORY_PRESERVE_RECENT_MESSAGES: '1',
+      LAB3_REPLACE_IN_FILE_MAX_INLINE_CHARS: '120',
+      LAB4_MOCK_RESPONSES: JSON.stringify([
+        `{"type":"tool_call","tool":"replace_in_file","input":{"path":"README.md","old_string":${JSON.stringify(originalText)},"new_string":${JSON.stringify(updatedText)},"replace_all":false}}`,
+        '{"type":"final","text":"replace complete"}',
+      ]),
+    },
+  })
+  activeSessions.add(initialSession)
+
+  await initialSession.waitForOutput(() => initialSession.stdout.includes('you> '))
+  initialSession.write('replace the readme content\n')
+  await initialSession.waitForOutput(() =>
+    initialSession.stdout.includes('approval required for replace_in_file'),
+  )
+  initialSession.write('1\n')
+  await initialSession.waitForOutput(() =>
+    initialSession.stdout.includes('[full tool result stored separately]'),
+  )
+  await initialSession.waitForOutput(() =>
+    initialSession.stdout.includes('assistant> replace complete'),
+  )
+  initialSession.write('/exit\n')
+  expect(await initialSession.waitForExit()).toBe(0)
+  activeSessions.delete(initialSession)
+
+  const transcriptPath = join(
+    storageRoot,
+    'sessions',
+    `${encodeURIComponent(sessionId)}.jsonl`,
+  )
+  const memoryPath = join(
+    storageRoot,
+    'session-memory',
+    `${encodeURIComponent(sessionId)}.json`,
+  )
+
+  const transcriptText = await readFile(transcriptPath, 'utf8')
+  const memoryText = await readFile(memoryPath, 'utf8')
+  const transcriptMessages = parseTranscriptMessages(transcriptText)
+  const toolMessages = transcriptMessages.filter(message => message.role === 'tool')
+
+  expect(transcriptText).toContain('[full tool result stored separately]')
+  expect(transcriptText).toContain('.claude-codex/tool-results/artifact-resume/')
+  expect(toolMessages).toHaveLength(1)
+  expect(toolMessages[0]!.text).not.toContain('replace-new line 79')
+  expect(toolMessages[0]!.artifact?.relativePath).toContain(
+    '.claude-codex/tool-results/artifact-resume/',
+  )
+  expect(memoryText).not.toContain('replace-new line 79')
+
+  const artifactScopes = await readdir(join(cwd, '.claude-codex', 'tool-results'))
+  expect(artifactScopes).toEqual(['artifact-resume'])
+  const artifactFiles = await readdir(
+    join(cwd, '.claude-codex', 'tool-results', artifactScopes[0]!),
+  )
+  expect(artifactFiles).toHaveLength(1)
+
+  const artifactText = await readFile(
+    join(cwd, '.claude-codex', 'tool-results', artifactScopes[0]!, artifactFiles[0]!),
+    'utf8',
+  )
+  expect(artifactText).toContain('replace-new line 79')
+
+  const resumedSession = spawnCliSession({
+    cwd,
+    entrypoint: lab4Entrypoint,
+    args: ['--resume', sessionId],
+    env: {
+      NO_COLOR: '1',
+      LAB4_MODEL_BACKEND: 'mock',
+      LAB4_STORAGE_ROOT: storageRoot,
+      LAB4_MEMORY_MIN_MESSAGES: '1',
+      LAB4_MEMORY_MIN_MESSAGES_BETWEEN_UPDATES: '1',
+      LAB4_MEMORY_PRESERVE_RECENT_MESSAGES: '1',
+      LAB3_REPLACE_IN_FILE_MAX_INLINE_CHARS: '120',
+      LAB4_MOCK_RESPONSES: JSON.stringify([
+        '{"type":"final","text":"resumed after artifact"}',
+      ]),
+    },
+  })
+  activeSessions.add(resumedSession)
+
+  await resumedSession.waitForOutput(() =>
+    resumedSession.stdout.includes(`Claude Codex · ${sessionId}`),
+  )
+  resumedSession.write('continue after artifact\n')
+  await resumedSession.waitForOutput(() =>
+    resumedSession.stdout.includes('assistant> resumed after artifact'),
+  )
+  resumedSession.write('/exit\n')
+  expect(await resumedSession.waitForExit()).toBe(0)
+  activeSessions.delete(resumedSession)
+
+  const resumedTranscriptText = await readFile(transcriptPath, 'utf8')
+  const resumedToolMessages = parseTranscriptMessages(resumedTranscriptText).filter(
+    message => message.role === 'tool',
+  )
+  expect(resumedTranscriptText).toContain('[full tool result stored separately]')
+  expect(resumedToolMessages).toHaveLength(1)
+  expect(resumedToolMessages[0]!.text).not.toContain('replace-new line 79')
+  },
+  { timeout: 15_000 },
+)
+
+function parseTranscriptMessages(text: string): Message[] {
+  return text
+    .trim()
+    .split('\n')
+    .filter(line => line.length > 0)
+    .map(line => {
+      const record = JSON.parse(line) as
+        | Message
+        | { type: 'message'; version: number; message: Message }
+      return 'message' in record ? record.message : record
+    })
+}
 
 async function writeSessionFiles(args: {
   storageRoot: string

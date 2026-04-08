@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AgentEvent } from '../../base/types/agent.ts'
 import type { Message } from '../../base/types/message.ts'
 import type { ModelClient } from '../../base/types/model.ts'
@@ -25,6 +26,16 @@ export interface ToolAgentQueryArgs {
   prepareMessages?: (args: {
     messages: readonly Message[]
   }) => readonly Message[] | Promise<readonly Message[]>
+  materializeToolResult?: (args: {
+    toolName: string
+    output: string
+    isError: boolean
+    cwd: string
+    messageId: string
+  }) => Promise<{
+    messageText: string
+    artifact?: Message['artifact']
+  }>
 }
 
 type AgentAction =
@@ -106,13 +117,28 @@ export function createToolAgentQuery(options: {
         cwd,
         requestToolApproval,
       )
-      transcript.append(createToolMessage(action.tool, result.output))
+      const toolMessageId = randomUUID()
+      const materialized =
+        (await args.materializeToolResult?.({
+          toolName: action.tool,
+          output: result.output,
+          isError: result.isError,
+          cwd,
+          messageId: toolMessageId,
+        })) ?? { messageText: result.output }
+
+      transcript.append(
+        createToolMessage(action.tool, materialized.messageText, {
+          id: toolMessageId,
+          artifact: materialized.artifact,
+        }),
+      )
 
       yield {
         type: 'tool_result',
         payload: {
           tool: action.tool,
-          output: result.output,
+          output: materialized.messageText,
           isError: result.isError,
         },
       }

@@ -18,6 +18,7 @@
     - `bun test`
     - `cat <path>`
 - tool-using loop with a small max-step guard
+- artifact-backed tool results for large `search_code`, `run_command`, and `replace_in_file` outputs
 - REPL with `/exit` and `/tools`
 
 ## Run
@@ -46,6 +47,9 @@ Debug mode prints Codex CLI's normal verbose stderr/stdout stream.
 - `LAB3_MAX_STEPS`
 - `LAB3_MODEL_BACKEND`
 - `LAB3_MOCK_RESPONSES`
+- `LAB3_SEARCH_CODE_MAX_INLINE_CHARS`
+- `LAB3_RUN_COMMAND_MAX_INLINE_CHARS`
+- `LAB3_REPLACE_IN_FILE_MAX_INLINE_CHARS`
 - `DEBUG=1`
 
 ## Source layout
